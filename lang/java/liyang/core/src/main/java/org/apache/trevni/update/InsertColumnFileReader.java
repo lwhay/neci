@@ -1,0 +1,133 @@
+package org.apache.trevni.update;
+
+import java.io.Closeable;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.apache.trevni.Input;
+import org.apache.trevni.InputFile;
+import org.apache.trevni.TrevniRuntimeException;
+
+public class InsertColumnFileReader implements Closeable{
+  private Input headFile;
+  private Input dataFile;
+
+  private long rowCount;
+  private int columnCount;
+  private FileMetaData metaData;
+  private ColumnDescriptor[] columns;
+  private Map<String,ColumnDescriptor> columnsByName;
+
+  public InsertColumnFileReader(File file) throws IOException{
+    this.dataFile = new InputFile(file);
+    this.headFile = new InputFile(new File(file.getPath().substring(0, file.getPath().lastIndexOf(".")) + ".head"));
+    readHeader();
+  }
+
+  public long getRowCount() { return rowCount; }
+
+  public int getColumnCount() { return columnCount; }
+
+  public FileMetaData getMetaData() { return metaData; }
+
+  /** Return all columns' metadata. */
+  public FileColumnMetaData[] getFileColumnMetaData() {
+    FileColumnMetaData[] result = new FileColumnMetaData[columnCount];
+    for (int i = 0; i < columnCount; i++)
+      result[i] = columns[i].metaData;
+      return result;
+    }
+
+  public List<FileColumnMetaData> getRoots() {
+    List<FileColumnMetaData> result = new ArrayList<FileColumnMetaData>();
+    for (int i = 0; i < columnCount; i++)
+      if (columns[i].metaData.getParent() == null)
+        result.add(columns[i].metaData);
+    return result;
+  }
+
+  public FileColumnMetaData getFileColumnMetaData(int number) {
+    return columns[number].metaData;
+  }
+  /** Return a column's metadata. */
+  public FileColumnMetaData getFileColumnMetaData(String name) {
+    return getColumn(name).metaData;
+  }
+
+  private <T extends Comparable> ColumnDescriptor<T> getColumn(String name) {
+    ColumnDescriptor column = columnsByName.get(name);
+    if (column == null)
+      throw new TrevniRuntimeException("No column named: "+name);
+    return (ColumnDescriptor<T>)column;
+  }
+
+  private void readHeader() throws IOException{
+    InputBuffer in = new InputBuffer(headFile, 0);
+    readMagic(in);
+    this.rowCount = in.readFixed64();
+    this.columnCount = in.readFixed32();
+    this.metaData = FileMetaData.read(in);
+    this.columnsByName = new HashMap<String,ColumnDescriptor>(columnCount);
+
+    columns = new ColumnDescriptor[columnCount];
+    readFileColumnMetaData(in);
+    readColumnStarts(in);
+  }
+
+  private void readMagic(InputBuffer in) throws IOException {
+    byte[] magic = new byte[InsertColumnFileWriter.MAGIC.length];
+    try {
+      in.readFully(magic);
+    } catch (IOException e) {
+      throw new IOException("Not a data file.");
+    }
+    if (!(Arrays.equals(InsertColumnFileWriter.MAGIC, magic)))
+      throw new IOException("Not a data file.");
+  }
+
+  private void readFileColumnMetaData(InputBuffer in) throws IOException {
+    for (int i = 0; i < columnCount; i++) {
+      FileColumnMetaData meta = FileColumnMetaData.read(in, this);
+      meta.setDefaults(this.metaData);
+      int blockCount = in.readFixed32();
+      BlockDescriptor[] blocks = new BlockDescriptor[blockCount];
+      for (int j = 0; j < blockCount; j++) {
+          blocks[j] = BlockDescriptor.read(in);
+//          if (meta.hasIndexValues())
+//          firstValues[i] = in.<T>readValue(meta.getType());
+      }
+      ColumnDescriptor column = new ColumnDescriptor(dataFile, meta);
+      column.setBlockDescriptor(blocks);
+      columns[i] = column;
+      meta.setNumber(i);
+      columnsByName.put(meta.getName(), column);
+    }
+  }
+
+  private void readColumnStarts(InputBuffer in) throws IOException {
+    for (int i = 0; i < columnCount; i++)
+      columns[i].start = in.readFixed64();
+  }
+
+  public <T extends Comparable> ColumnValues<T> getValues(String columnName)
+    throws IOException {
+    return new ColumnValues<T>(getColumn(columnName));
+  }
+
+  public <T extends Comparable> ColumnValues<T> getValues(int column)
+    throws IOException {
+    return new ColumnValues<T>(columns[column]);
+  }
+
+@Override
+  public void close() throws IOException {
+    headFile.close();
+    dataFile.close();
+  }
+
+}
