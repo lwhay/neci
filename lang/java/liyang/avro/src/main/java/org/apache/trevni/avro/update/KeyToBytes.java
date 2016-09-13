@@ -45,14 +45,14 @@ public class KeyToBytes {
     }else{
       bytes = new byte[keyFields.length][];
       for(i = 0; i < keyFields.length; i++){
-        Field f = fs.get(i);
+        Field f = fs.get(keyFields[i]);
         switch(f.schema().getType()){
-        case LONG:  {  createLongField(Long.parseLong(record.get(i).toString()), i);  break;  }
-        case INT:  {  createIntField(Integer.parseInt(record.get(i).toString()), i);  break;  }
-        case FLOAT:  {  int v = Float.floatToIntBits(Float.parseFloat(record.get(i).toString()));  createIntField(v, i);  break;  }
-        case DOUBLE: {  long v = Double.doubleToLongBits(Long.parseLong(record.get(i).toString()));  createLongField(v, i);  break;  }
+        case LONG:  {  createLongField(Long.parseLong(record.get(keyFields[i]).toString()), i);  break;  }
+        case INT:  {  createIntField(Integer.parseInt(record.get(keyFields[i]).toString()), i);  break;  }
+        case FLOAT:  {  int v = Float.floatToIntBits(Float.parseFloat(record.get(keyFields[i]).toString()));  createIntField(v, i);  break;  }
+        case DOUBLE: {  long v = Double.doubleToLongBits(Long.parseLong(record.get(keyFields[i]).toString()));  createLongField(v, i);  break;  }
         case BYTES:
-        case STRING:  {  createStringField(record.get(i).toString(), i);  break;  }
+        case STRING:  {  createStringField(record.get(keyFields[i]).toString(), i);  break;  }
         default:  throw new RuntimeException("This Key type is not support!");
         }
       }

@@ -198,7 +198,7 @@ public class InsertAvroColumnReader<D> implements Iterator<D>, Iterable<D>, Clos
     case ARRAY:
       values[column].startRow();
       int length = values[column].nextLength();
-      List elements = (List) new GenericData.Array<>(length, s);
+      List elements = (List) new GenericData.Array(length, s);
       for(int i = 0; i < length; i++){
         this.column = startColumn;
         Object value;

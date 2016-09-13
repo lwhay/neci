@@ -5,13 +5,12 @@ import java.io.IOException;
 import java.util.List;
 
 import org.apache.avro.Schema;
-import org.apache.avro.file.DataFileReader;
 import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericData.Record;
-import org.apache.avro.generic.GenericDatumReader;
-import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.DatumWriter;
+
+import org.apache.trevni.avro.update.SortedAvroReader.AvroReader;;
 
 public class SortedAvroWriter {
   private String path;
@@ -29,6 +28,7 @@ public class SortedAvroWriter {
     assert numFiles > 1;
     this.path = path;
     this.numFiles = numFiles;
+    fileDelete(path);
     createFiles(path, numFiles);
     this.schema = schema;
     this.sortKeyFields = keyFields;
@@ -50,22 +50,22 @@ public class SortedAvroWriter {
     }
   }
 
-  public void createFiles(String path, int no){
-    for(int i = 0; i < no; i++){
-      File file = new File(path+"file"+String.valueOf(i)+".avro");
-      if(!file.exists()){
-        file.mkdirs();
-      }else{
-        file.delete();
+  public void fileDelete(String path){
+    File file = new File(path);
+    if(file.exists() & file.isDirectory()){
+      File[] files = file.listFiles();
+      for(int i = 0; i < files.length; i++){
+        files[i].delete();
       }
-      files[i] = file;
     }
-    tmpFile = new File(path + "tmp");
-    if(!tmpFile.exists()){
-      tmpFile.mkdirs();
-    }else{
-      tmpFile.delete();
+  }
+
+  public void createFiles(String path, int no){
+    files = new File[no];
+    for(int i = 0; i < no; i++){
+    	files[i] = new File(path+"file"+String.valueOf(i)+".avro");
     }
+    tmpFile = new File(path + "readtmp");
   }
 
   public void append(Record record) throws IOException{
@@ -87,10 +87,16 @@ public class SortedAvroWriter {
   public void writeToFile() throws IOException{
     DatumWriter<Record> writer = new GenericDatumWriter<Record>(schema);
     DataFileWriter<Record> fileWriter = new DataFileWriter<Record>(writer);
+    if(!files[fileIndex].getParentFile().exists()){
+      files[fileIndex].getParentFile().mkdirs();
+    }
+    if(!files[fileIndex].exists()){
+      files[fileIndex].createNewFile();
+    }
     fileWriter.create(schema, files[fileIndex]);
     List<Record> values = sort.values();
     sort.clear();
-    for(int i = MAX - 1; i >= 0; i--){
+    for(int i = values.size() - 1; i >= 0; i--){
       fileWriter.append(values.get(i));
     }
     values = null;
@@ -156,7 +162,7 @@ public class SortedAvroWriter {
       int m = start;
       ComparableKey key = new ComparableKey(sortRecord[noR[start]], sortKeyFields);
       for(int i = start + 1; i < no; i++){
-        if(key.compareTo(new ComparableKey(sortRecord[noR[i]], sortKeyFields)) < 0){
+        if(key.compareTo(new ComparableKey(sortRecord[noR[i]], sortKeyFields)) <= 0){
           break;
         }else{
           m++;
@@ -176,23 +182,6 @@ public class SortedAvroWriter {
     fileWriter.close();
     for(int i = 0; i < no; i++){
       files[i].delete();
-    }
-  }
-
-  public class AvroReader{
-    private DataFileReader<Record> fileReader;
-
-    public AvroReader(Schema schema, File file) throws IOException{
-      DatumReader<Record>reader = new GenericDatumReader<Record>(schema);
-      fileReader = new DataFileReader<Record>(file, reader);
-    }
-
-    public boolean hasNext(){
-      return fileReader.hasNext();
-    }
-
-    public Record next(){
-      return fileReader.next();
     }
   }
 }

@@ -137,10 +137,11 @@ public class BloomFilter {
     }
 
     public void write(File file) throws IOException{
-      if(file.exists()){
-        file.delete();
-      }else{
-        file.mkdir();
+      if(!file.getParentFile().exists()){
+        file.getParentFile().mkdirs();
+      }
+      if(!file.exists()){
+        file.createNewFile();
       }
       BufferedOutputStream out = new BufferedOutputStream(new FileOutputStream(file));
       out.write(intToBytes(numHashes));

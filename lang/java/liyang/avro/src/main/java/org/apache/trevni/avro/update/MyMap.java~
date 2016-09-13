@@ -114,7 +114,7 @@ public class MyMap<K, V> {
     Entry<K, V> t = tail;
     if (t == null) {
       compare(key, key); // type (and possibly null) check
-      tail = new Entry<K, V>(key, value);
+      tail = new Entry<>(key, value);
       size = 1;
       modCount++;
       return;
@@ -153,7 +153,7 @@ public class MyMap<K, V> {
       } while (t != null);
     }
 
-    Entry<K, V> e = new Entry<K, V>(key, value);
+    Entry<K, V> e = new Entry<>(key, value);
     if(parent == null){
       e.left = tail;
       tail = e;
@@ -220,10 +220,10 @@ public class MyMap<K, V> {
     public boolean equals(Object o) {
       if (!(o instanceof Map.Entry))
         return false;
-      Map.Entry<?,?> e = (Map.Entry<?,?>)o;
+        Map.Entry<?,?> e = (Map.Entry<?,?>)o;
 
-      return (key == null ? e.getKey() == null : key.equals(e.getKey()))
-        && (value == null ? e.getValue() == null : value.equals(e.getValue()));
+        return (key == null ? e.getKey() == null : key.equals(e.getKey()))
+          && (value == null ? e.getValue() == null : value.equals(e.getValue()));
      }
 
      public int hashCode() {
