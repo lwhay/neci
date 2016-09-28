@@ -1,8 +1,6 @@
 package org.apache.trevni.avro.update;
 
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.List;
 import java.util.Map;
 
 public class MyMap<K, V> {
@@ -71,10 +69,12 @@ public class MyMap<K, V> {
     tail = null;
   }
 
-  public List<V> values() {
-    List<V> v = new ArrayList<V>();
-    for (Entry<K, V> p = tail; p != null; p = p.left) {
-      v.add(p.getValue());
+  public Object[] values() {
+    Object[] v = new Object[size];
+    while(tail != null){
+      v[size - 1] = tail.getValue();
+      tail = tail.left;
+      size--;
     }
     return v;
   }

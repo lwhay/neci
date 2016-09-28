@@ -54,6 +54,8 @@ public class ColumnValues<T extends Comparable>
   /** Return the current row number within this file. */
   public long getRow() { return row; }
 
+  public ValueType getType(){  return type; }
+
   /** Seek to the named row. */
   public void seek(long r) throws IOException {
     if (r < row || r >= column.lastRow(block))    // not in current block

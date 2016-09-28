@@ -9,6 +9,8 @@ public class SortedArray<K, V> {
   private boolean sorted;
   private List<Element> elements;
 
+  private static final int MAX = 10000;
+
   private transient int size = 0;
 
   private class Element{
@@ -45,6 +47,10 @@ public class SortedArray<K, V> {
     this.comparator = comparator;
     sorted = true;
     this.elements = new ArrayList<Element>();
+  }
+
+  public V get(int i){
+    return elements.get(i).getValue();
   }
 
   public V get(K key){
@@ -124,16 +130,26 @@ public class SortedArray<K, V> {
   }
 
   public void clear(){
-    size = 0;
     elements.clear();
+    size = 0;
     sorted = true;
   }
 
   public List<V> values(){
+    if(!sorted)  sort();
     List<V> values = new ArrayList<V>();
+    while(size > MAX){
+      for(int i = 0; i < MAX; i++){
+        values.add(elements.get(i).getValue());
+      }
+      elements.subList(0, MAX).clear();
+      size -= MAX;
+    }
     for(int i = 0; i < size; i++){
       values.add(elements.get(i).getValue());
     }
+    elements.clear();
+    size = 0;
     return values;
   }
 
@@ -145,6 +161,7 @@ public class SortedArray<K, V> {
 //    }
     sorted = false;
     elements.add(new Element(key, value));
+    size++;
   }
 
   public void insert(K key, V value){
@@ -159,6 +176,7 @@ public class SortedArray<K, V> {
         else if(cmp > 0)  j = m;
         else{
           elements.set(m, new Element(key, value));
+          return;
         }
       }
       int cm = comparator.compare(elements.get(i).getKey(), key);
@@ -176,6 +194,7 @@ public class SortedArray<K, V> {
         else if(cmp > 0)  j = m;
         else{
           elements.set(m, new Element(key, value));
+          return;
         }
       }
       int cm = ((Comparable<? super K>)elements.get(i).getKey()).compareTo(key);
@@ -189,7 +208,10 @@ public class SortedArray<K, V> {
   }
 
   public void sort(){
+    long start = System.currentTimeMillis();
     sort(0, (size - 1));
+    long end = System.currentTimeMillis();
+    System.out.println("@@@sort time: " + (end - start));
   }
 
   private void sort(int min, int max){
@@ -230,6 +252,7 @@ public class SortedArray<K, V> {
       else if(j <= max)  for(; j <= max; j++)  ele.add(elements.get(j));
     }
     assert(ele.size() == (max -min +1));
-    for(int m = 0; m <= ele.size(); m++)  elements.set((min + m), ele.get(m));
+    for(int m = 0; m < ele.size(); m++)  elements.set((min + m), ele.get(m));
+    sorted = true;
   }
 }

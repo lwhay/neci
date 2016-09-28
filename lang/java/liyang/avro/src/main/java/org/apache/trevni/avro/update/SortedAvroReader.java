@@ -20,8 +20,11 @@ public class SortedAvroReader {
   private int start = 0;
 
   public SortedAvroReader(String path, Schema schema, int[] keyFields) throws IOException{
-    File fpath = new File(path);
-    this.files = fpath.listFiles();
+    this((new File(path)).listFiles(), schema, keyFields);
+  }
+
+  public SortedAvroReader(File[] files, Schema schema, int[] keyFields) throws IOException{
+    this.files = files;
     this.numFiles = files.length;
     this.schema = schema;
     this.sortKeyFields = keyFields;
@@ -37,21 +40,17 @@ public class SortedAvroReader {
       sortedRecord[i] = readers[i].next();
       noR[i] = i;
     }
-    Record tmp[] = sortedRecord;
     for(int i = 0; i < numFiles - 1; i++){
       for(int j = i + 1; j < numFiles; j++){
-      ComparableKey k1 = new ComparableKey(tmp[i], sortKeyFields);
-      ComparableKey k2 = new ComparableKey(tmp[j], sortKeyFields);
-      if(k1.compareTo(k2) > 0){
-        int tmpNo = noR[i];
-        noR[i] = noR[j];
-        noR[j] = tmpNo;
-        Record tmpR = tmp[i];
-        tmp[i] = tmp[j];
-        tmp[j] = tmpR;
-          }
+        CombKey k1 = new CombKey(sortedRecord[noR[i]], sortKeyFields);
+        CombKey k2 = new CombKey(sortedRecord[noR[j]], sortKeyFields);
+        if(k1.compareTo(k2) > 0){
+          int tmpNo = noR[i];
+          noR[i] = noR[j];
+          noR[j] = tmpNo;
         }
       }
+    }
   }
 
   public Record next(){
@@ -61,9 +60,9 @@ public class SortedAvroReader {
     }else{
       sortedRecord[noR[start]] = readers[noR[start]].next();
       int m = start;
-      ComparableKey key = new ComparableKey(sortedRecord[noR[start]], sortKeyFields);
+      CombKey key = new CombKey(sortedRecord[noR[start]], sortKeyFields);
       for(int i = start + 1; i < numFiles; i++){
-        if(key.compareTo(new ComparableKey(sortedRecord[noR[i]], sortKeyFields)) > 0){
+        if(key.compareTo(new CombKey(sortedRecord[noR[i]], sortKeyFields)) > 0){
           m++;
         }else{
           break;
@@ -81,8 +80,7 @@ public class SortedAvroReader {
   }
 
   public boolean hasNext(){
-    if(start < numFiles)    return true;
-    else                                return false;
+    return (start < numFiles);
   }
 
   public static class AvroReader{

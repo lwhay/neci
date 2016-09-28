@@ -10,10 +10,10 @@ import java.util.List;
 import org.apache.trevni.ValueType;
 
 public class InsertColumnFileWriter {
-  private ColumnValues[] values;
   private FileColumnMetaData[] meta;
   private FileMetaData filemeta;
   private InsertColumnFileReader reader;
+  private ColumnValues[] values;
   private ListArr[] insert;
   private long rowcount;
   private int columncount;
@@ -77,13 +77,13 @@ public class InsertColumnFileWriter {
    //     System.out.println("$$$$$$$$$\t"+(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()));
    // }
 
-  public InsertColumnFileWriter(File fromfile, ListArr[] sort) throws IOException {
-    this.reader = new InsertColumnFileReader(fromfile);
-    this.insert = sort;
-    this.filemeta = reader.getMetaData();
-    this.meta = reader.getFileColumnMetaData();
-    this.addRow = sort[0].size();
-  }
+//  public InsertColumnFileWriter(File fromfile, ListArr[] sort) throws IOException {
+//    this.reader = new InsertColumnFileReader(fromfile);
+//    this.insert = sort;
+//    this.filemeta = reader.getMetaData();
+//    this.meta = reader.getFileColumnMetaData();
+//    this.addRow = sort[0].size();
+//  }
 
   public InsertColumnFileWriter(FileMetaData filemeta, FileColumnMetaData[] meta)
     throws IOException {
@@ -98,12 +98,16 @@ public class InsertColumnFileWriter {
   }
 
   public void setReadFile(File file) throws IOException{
-    this.reader = new InsertColumnFileReader(file);
+    this.reader  = new InsertColumnFileReader(file);
   }
 
   public void setInsert(ListArr[] sort){
     this.insert = sort;
     this.addRow = sort[0].size();
+  }
+
+  public void setGap(long[] gap){
+    this.gap = gap;
   }
 
   public void appendTo(File file) throws IOException {
@@ -126,10 +130,9 @@ public class InsertColumnFileWriter {
   }
 
   public void insertTo(OutputStream head, OutputStream data) throws IOException {
-    rowcount = reader.getRowCount() + addRow;
-    values = new ColumnValues[columncount];
-
-    for (int i = 0; i < columncount; i++) {
+    rowcount = addRow + reader.getRowCount();
+    values = new ColumnValues[meta.length];
+    for(int i = 0; i < meta.length; i++){
       values[i] = reader.getValues(i);
     }
 
@@ -182,79 +185,13 @@ public class InsertColumnFileWriter {
   }
 
   private void writeColumns(OutputStream out) throws IOException {
-    OutputBuffer buf = new OutputBuffer();
-    gap = new long[addRow + 1];
+    assert(gap.length == (addRow + 1));
     nest = new int[addRow];
     for (int k = 0; k < addRow; k++) {
       nest[k] = 1;
     }
-    int i = 0;
-    int g = 0;
-    int row = 0;
-    while (values[0].hasNext()) {
-      if(buf.isFull()){
-        BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
-        blocks[0].add(b);
-        row = 0;
-        buf.writeTo(out);
-        buf.reset();
-      }
-      long pk0 = Long.parseLong(values[0].next().toString());
-      if (i < addRow) {
-        while (true) {
-          if(buf.isFull()){
-            BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
-            blocks[0].add(b);
-            row = 0;
-            buf.writeTo(out);
-            buf.reset();
-          }
-          if (pk0 > (Long) insert[0].get(i)) {
-            buf.writeLong((Long) insert[0].get(i));
-            row++;
-            i++;
-            gap[i] = g;
-            g = 0;
-            continue;
-          } else {
-            buf.writeLong(pk0);
-            row++;
-            g++;
-            break;
-          }
-        }
-      } else {
-        buf.writeLong(pk0);
-        g++;
-        row++;
-      }
-    }
-    gap[i] = g;
-    if (i < addRow) {
-      for (int j = i; j < addRow; j++) {
-        if(buf.isFull()){
-          BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
-          blocks[0].add(b);
-          row = 0;
-          buf.writeTo(out);
-          buf.reset();
-        }
-        buf.writeLong((Long) insert[0].get(j));
-        row++;
-      }
-    }
 
-    insert[0].clear();
-
-    if(buf.size() != 0){
-      BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
-      blocks[0].add(b);
-      buf.writeTo(out);
-    }
-
-    buf.close();
-
-    for (int j = 1; j < columncount; j++) {
+    for (int j = 0; j < columncount; j++) {
       if (meta[j].getType() == ValueType.NULL) {
         writeArrayColumn(out, j);
       } else {

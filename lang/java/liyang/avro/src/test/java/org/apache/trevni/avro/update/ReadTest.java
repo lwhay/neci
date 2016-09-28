@@ -22,6 +22,7 @@ public class ReadTest {
       System.out.println(Long.parseLong(ol.get(0).toString()));
       x++;
     }
+    reader.close();
     long end = System.currentTimeMillis();
     System.out.println("********"+x+"\ttime: "+(end - start));
   }

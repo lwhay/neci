@@ -4,27 +4,25 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-//import java.io.LineNumberReader;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.ArrayList;
 
 import org.apache.avro.Schema;
 import org.apache.avro.Schema.Field;
-import org.apache.avro.file.DataFileReader;
 import org.apache.avro.generic.GenericData.Record;
-import org.apache.avro.generic.GenericDatumReader;
-import org.apache.avro.io.DatumReader;
+import org.apache.trevni.avro.update.BTreeRecord.BTreeCreator;
 import org.apache.trevni.avro.update.BloomFilter.BloomFilterBuilder;
 
 public class NestedLoad {
   private NestSchema[] schemas;
-  private static final File TMPFILE1 = new File("/home/ly/test/tmp1.trv");
-  private static final File TMPFILE2 = new File("/home/ly/test/tmp2.trv");
-  private static final String TMPPATH = "/home/ly/test/tmp/";
+  private String resultPath;
+  private String tmpPath;
 
-  public NestedLoad(NestSchema[] schemas){
+  public NestedLoad(NestSchema[] schemas, String tmppath, String resultPath){
     this.schemas = schemas;
+    this.tmpPath = tmppath;
+    this.resultPath = resultPath;
     create();
   }
 
@@ -72,22 +70,29 @@ public class NestedLoad {
     BloomFilterBuilder builder1 = createBloom(schema1.getBloomFile(), schema1.getSchema(), schema1.getKeyFields(), numElements1);
     BloomFilterBuilder builder2 = createBloom(schema2.getBloomFile(), schema2.getSchema(), schema2.getKeyFields(), numElements2);
 
+    boolean x = btreeCreate(schema1.getKeyFields(), schema1.getOutKeyFields());
+    if(x){
+      BTreeRecord btree = new BTreeRecord(schema1.getKeyFields(), schema1.getOutKeyFields(), schema1.getSchema(), schema1.getBTreeFile(),  "btree");
+      BTreeCreator creator = btree.createBTree();
+    }
+
     //将file1,file2按照file1的外键排序
 //    BufferedReader reader1 = new BufferedReader(new FileReader(file1));
 //    BufferedReader reader2 = new BufferedReader(new FileReader(file2));
-    SortedAvroReader reader1 = new SortedAvroReader(schema1.getPath(), schema1.getSchema(), fields1);
-    SortedAvroReader reader2 = new SortedAvroReader(schema2.getPath(), schema2.getSchema(), schema2.getKeyFields());
-    InsertAvroColumnWriter<ComparableKey, Record> writer = new InsertAvroColumnWriter<ComparableKey, Record>(schema2.getNestedSchema(), TMPFILE1.getAbsolutePath(), TMPFILE2.getAbsolutePath());
+    long start = System.currentTimeMillis();
+    SortedAvroReader reader1 = new SortedAvroReader(schema1.getPath(), schema1.getEncodeSchema(), fields1);
+    SortedAvroReader reader2 = new SortedAvroReader(schema2.getPath(), schema2.getEncodeSchema(), schema2.getKeyFields());
+    InsertAvroColumnWriter<CombKey, Record> writer = new InsertAvroColumnWriter<CombKey, Record>(schema2.getNestedSchema(), resultPath, 4,  schema2.getKeyFields());
 
     Record record1 = reader1.next();
     builder1.add(record1);
     while(reader2.hasNext()){
       Record record2 = reader2.next();
       builder2.add(record2);
-      ComparableKey k2 = new ComparableKey(record2, schema2.getKeyFields());
+      CombKey k2 = new CombKey(record2, schema2.getKeyFields());
       List<Record> arr = new ArrayList<Record>();
       while(true){
-        ComparableKey k1 = new ComparableKey(record1, schema1.getOutKeyFields());
+        CombKey k1 = new CombKey(record1, schema1.getOutKeyFields());
         if(k2.compareTo(k1) == 0){
           arr.add(record1);
           if(reader1.hasNext()){
@@ -101,12 +106,16 @@ public class NestedLoad {
           break;
         }
       }
-      Record record = join(schema2.getNestedSchema(), record2, arr);
+      Record record = join(schema2.getEncodeNestedSchema(), record2, arr);
       writer.append(k2, record);
     }
     writer.flush();
     builder1.write();
     builder2.write();
+    long end = System.currentTimeMillis();
+    System.out.println(schema2.getSchema().getName() + "+" + schema1.getSchema().getName() + "\tsort avro time: " + (end - start) + "ms");
+    deleteFile(schema1.getPath());
+    deleteFile(schema2.getPath());
   }
 
   public Record join(Schema schema, Record record, List<Record> arr){
@@ -137,18 +146,19 @@ public class NestedLoad {
     BloomFilterBuilder builder1 = createBloom(schema1.getBloomFile(), schema1.getSchema(), schema1.getKeyFields(), numElements1);
     BloomFilterBuilder builder2 = createBloom(schema2.getBloomFile(), schema2.getSchema(), schema2.getKeyFields(), numElements2);
     //将file1,file2按照file1的外键排序
-    SortedAvroReader reader1 = new SortedAvroReader(schema1.getPath(), schema1.getSchema(), fields1);
-    SortedAvroReader reader2 = new SortedAvroReader(schema2.getPath(), schema2.getSchema(), schema2.getKeyFields());
-    SortedAvroWriter writer = new SortedAvroWriter(TMPPATH, 4, schema2.getNestedSchema(), keyJoin(schema2.getOutKeyFields(), schema2.getKeyFields()));
+    long start = System.currentTimeMillis();
+    SortedAvroReader reader1 = new SortedAvroReader(schema1.getPath(), schema1.getEncodeSchema(), fields1);
+    SortedAvroReader reader2 = new SortedAvroReader(schema2.getPath(), schema2.getEncodeSchema(), schema2.getKeyFields());
+    SortedAvroWriter writer = new SortedAvroWriter(tmpPath, 4, schema2.getEncodeNestedSchema(), keyJoin(schema2.getOutKeyFields(), schema2.getKeyFields()));
 
     Record record1 = reader1.next();
     builder1.add(record1);
     while(reader2.hasNext()){
       Record record2 = reader2.next();
-      ComparableKey k2 = new ComparableKey(record2, schema2.getKeyFields());
+      CombKey k2 = new CombKey(record2, schema2.getKeyFields());
       List<Record> arr = new ArrayList<Record>();
       while(true){
-        ComparableKey k1 = new ComparableKey(record1, schema1.getOutKeyFields());
+        CombKey k1 = new CombKey(record1, schema1.getOutKeyFields());
         if(k2.compareTo(k1) == 0){
           arr.add(record1);
           if(reader1.hasNext()){
@@ -162,31 +172,36 @@ public class NestedLoad {
           break;
         }
       }
-      Record record = join(schema2.getNestedSchema(), record2, arr);
+      Record record = join(schema2.getEncodeNestedSchema(), record2, arr);
       writer.append(record);
     }
     writer.flush();
     builder1.write();
     builder2.write();
-    moveTo(TMPPATH, schema2.getPath());
+    long end = System.currentTimeMillis();
+    System.out.println(schema2.getSchema().getName() + "+" + schema1.getSchema().getName() + "\tsort avro time: " + (end - start) + "ms");
+    deleteFile(schema1.getPath());
+    deleteFile(schema2.getPath());
+    moveTo(tmpPath, schema2.getPath());
   }
 
   public void orLoad(NestSchema schema1, NestSchema schema2) throws IOException{
     long numElements2 = toSortAvroFile(schema2, schema2.getKeyFields());
     BloomFilterBuilder builder2 = createBloom(schema2.getBloomFile(), schema2.getSchema(), schema2.getKeyFields(), numElements2);
     //将file1,file2按照file1的外键排序
-    SortedAvroReader reader1 = new SortedAvroReader(schema1.getPath(), schema1.getNestedSchema(), keyJoin(schema1.getOutKeyFields(), schema1.getKeyFields()));
-    SortedAvroReader reader2 = new SortedAvroReader(schema2.getPath(), schema2.getSchema(), schema2.getKeyFields());
-    SortedAvroWriter writer = new SortedAvroWriter(TMPPATH, 4, schema2.getNestedSchema(), keyJoin(schema2.getOutKeyFields(), schema2.getKeyFields()));
+    long start = System.currentTimeMillis();
+    SortedAvroReader reader1 = new SortedAvroReader(schema1.getPath(), schema1.getEncodeNestedSchema(), keyJoin(schema1.getOutKeyFields(), schema1.getKeyFields()));
+    SortedAvroReader reader2 = new SortedAvroReader(schema2.getPath(), schema2.getEncodeSchema(), schema2.getKeyFields());
+    SortedAvroWriter writer = new SortedAvroWriter(tmpPath, 4, schema2.getEncodeNestedSchema(), keyJoin(schema2.getOutKeyFields(), schema2.getKeyFields()));
     //BufferedWriter out = new BufferedWriter(new FileWriter(new File("/home/ly/tmp.avro")));
 
     Record record1 = reader1.next();
     while(reader2.hasNext()){
       Record record2 = reader2.next();
-      ComparableKey k2 = new ComparableKey(record2, schema2.getKeyFields());
+      CombKey k2 = new CombKey(record2, schema2.getKeyFields());
       List<Record> arr = new ArrayList<Record>();
       while(true){
-        ComparableKey k1 = new ComparableKey(record1, schema1.getOutKeyFields());
+        CombKey k1 = new CombKey(record1, schema1.getOutKeyFields());
         if(k2.compareTo(k1) == 0){
           arr.add(record1);
           if(reader1.hasNext()){
@@ -199,30 +214,35 @@ public class NestedLoad {
           break;
         }
       }
-      Record record = join(schema2.getNestedSchema(), record2, arr);
+      Record record = join(schema2.getEncodeNestedSchema(), record2, arr);
       writer.append(record);
     }
     writer.flush();
     builder2.write();
-    moveTo(TMPPATH, schema2.getPath());
+    long end = System.currentTimeMillis();
+    System.out.println(schema2.getSchema().getName() + "+" + schema1.getSchema().getName() + "\tsort avro time: " + (end - start) + "ms");
+    deleteFile(schema1.getPath());
+    deleteFile(schema2.getPath());
+    moveTo(tmpPath, schema2.getPath());
   }
 
   public void laLoad(NestSchema schema1, NestSchema schema2) throws IOException{
     long numElements2 = toSortAvroFile(schema2, schema2.getKeyFields());
     BloomFilterBuilder builder2 = createBloom(schema2.getBloomFile(), schema2.getSchema(), schema2.getKeyFields(), numElements2);
 
-    SortedAvroReader reader1 = new SortedAvroReader(schema1.getPath(), schema1.getNestedSchema(), keyJoin(schema1.getOutKeyFields(), schema1.getKeyFields()));
-    SortedAvroReader reader2 = new SortedAvroReader(schema2.getPath(), schema2.getSchema(), schema2.getKeyFields());
-    InsertAvroColumnWriter<ComparableKey, Record> writer = new InsertAvroColumnWriter<ComparableKey, Record>(schema2.getNestedSchema(), TMPFILE1.getAbsolutePath(), TMPFILE2.getAbsolutePath());
+    long start = System.currentTimeMillis();
+    SortedAvroReader reader1 = new SortedAvroReader(schema1.getPath(), schema1.getEncodeNestedSchema(), keyJoin(schema1.getOutKeyFields(), schema1.getKeyFields()));
+    SortedAvroReader reader2 = new SortedAvroReader(schema2.getPath(), schema2.getEncodeSchema(), schema2.getKeyFields());
+    InsertAvroColumnWriter<CombKey, Record> writer = new InsertAvroColumnWriter<CombKey, Record>(schema2.getNestedSchema(), resultPath, 4, schema2.getKeyFields());
 
     Record record1 = reader1.next();
     while(reader2.hasNext()){
       Record record2 = reader2.next();
       builder2.add(record2);
-      ComparableKey k2 = new ComparableKey(record2, schema2.getKeyFields());
+      CombKey k2 = new CombKey(record2, schema2.getKeyFields());
       List<Record> arr = new ArrayList<Record>();
       while(true){
-        ComparableKey k1 = new ComparableKey(record1, schema1.getOutKeyFields());
+        CombKey k1 = new CombKey(record1, schema1.getOutKeyFields());
         if(k2.compareTo(k1) == 0){
           arr.add(record1);
           if(reader1.hasNext()){
@@ -235,22 +255,48 @@ public class NestedLoad {
           break;
         }
       }
-      Record record = join(schema2.getNestedSchema(), record2, arr);
+      Record record = join(schema2.getEncodeNestedSchema(), record2, arr);
       writer.append(k2, record);
     }
     writer.flush();
     builder2.write();
+    long end = System.currentTimeMillis();
+    System.out.println(schema2.getSchema().getName() + "+" + schema1.getSchema().getName() + "\tsort avro time: " + (end - start) + "ms");
+    deleteFile(schema1.getPath());
+    deleteFile(schema2.getPath());
+  }
+
+  public boolean btreeCreate(int[] key, int[] value){
+    for(int i = 0; i < value.length; i++){
+      int j = 0;
+      while(j < key.length){
+        if(key[j] == value[i]){
+          break;
+        }else{
+          j++;
+        }
+      }
+      if(j == key.length){
+        return false;
+      }
+    }
+    return true;
+  }
+
+  public void deleteFile(String path){
+    File file = new File(path);
+    if(file.isDirectory()){
+      File[] files = file.listFiles();
+      for(int i = 0; i < files.length; i++){
+        deleteFile(files[i].getAbsolutePath());
+      }
+    }else{
+      file.delete();
+    }
   }
 
   public void moveTo(String path, String toPath){
     File file = new File(path);
-    File toFile = new File(toPath);
-    if(toFile.isDirectory()){
-      File[] files = toFile.listFiles();
-      for(int i = 0; i < files.length; i++){
-        files[i].delete();
-      }
-    }
     if(file.isDirectory()){
       File[] files = file.listFiles();
       for(int i = 0; i < files.length; i++){
@@ -261,17 +307,21 @@ public class NestedLoad {
 
   public long toSortAvroFile(NestSchema schema, int[] keyFields) throws IOException{
     long numElements = 0;
+    long start = System.currentTimeMillis();
     File file = schema.getPrFile();
     BufferedReader reader = new BufferedReader(new FileReader(file));
-    SortedAvroWriter writer = new SortedAvroWriter(schema.getPath(), 4, schema.getSchema(), keyFields);
+    SortedAvroWriter writer = new SortedAvroWriter(schema.getPath(), 4, schema.getEncodeSchema(), keyFields);
     String line;
     while((line = reader.readLine()) != null){
       String[] tmp = line.split("\\|");
       numElements++;
-      writer.append(arrToRecord(tmp, schema.getSchema()));
+      writer.append(arrToRecord(tmp, schema.getEncodeSchema()));
     }
     writer.flush();
     reader.close();
+    long end = System.currentTimeMillis();
+    System.out.println(schema.getSchema().getName() + "\tsort avro time: " + (end - start) + "ms");
+    deleteFile(schema.getPrFile().getAbsolutePath());
     return numElements;
   }
 

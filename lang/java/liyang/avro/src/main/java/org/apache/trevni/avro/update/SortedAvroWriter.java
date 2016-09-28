@@ -2,15 +2,12 @@ package org.apache.trevni.avro.update;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.List;
 
 import org.apache.avro.Schema;
 import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericData.Record;
 import org.apache.avro.io.DatumWriter;
-
-import org.apache.trevni.avro.update.SortedAvroReader.AvroReader;;
 
 public class SortedAvroWriter {
   private String path;
@@ -19,7 +16,9 @@ public class SortedAvroWriter {
   private File tmpFile;
   private Schema schema;
   private int[] sortKeyFields;
-  private MyMap<ComparableKey, Record> sort = new MyMap<ComparableKey, Record>();
+  private int[] wTimes;
+  private SortedArray<CombKey, Record> sort = new SortedArray<CombKey, Record>();
+  private int x = 0;
 
   private int fileIndex = 0;
   private static final int MAX = 200000;
@@ -28,6 +27,7 @@ public class SortedAvroWriter {
     assert numFiles > 1;
     this.path = path;
     this.numFiles = numFiles;
+    wTimes = new int[numFiles];
     fileDelete(path);
     createFiles(path, numFiles);
     this.schema = schema;
@@ -40,14 +40,6 @@ public class SortedAvroWriter {
 
   public int getFileIndex(){
     return fileIndex;
-  }
-
-  public void writeTo(File file) throws IOException{
-    if(fileIndex > 1){
-      fileMerge((fileIndex - 1), file);
-    }else{
-      files[0].renameTo(file);
-    }
   }
 
   public void fileDelete(String path){
@@ -63,7 +55,7 @@ public class SortedAvroWriter {
   public void createFiles(String path, int no){
     files = new File[no];
     for(int i = 0; i < no; i++){
-    	files[i] = new File(path+"file"+String.valueOf(i)+".avro");
+      files[i] = new File(path+"file"+String.valueOf(i)+".avro");
     }
     tmpFile = new File(path + "readtmp");
   }
@@ -72,7 +64,7 @@ public class SortedAvroWriter {
     if(!schema.equals(record.getSchema())){
       throw new IOException("This record does not match the writer schema!!");
     }
-    sort.put(new ComparableKey(record, sortKeyFields),  record);
+    sort.put(new CombKey(record, sortKeyFields),  record);
     if(sort.size() == MAX){
       writeToFile();
     }
@@ -85,103 +77,86 @@ public class SortedAvroWriter {
   }
 
   public void writeToFile() throws IOException{
-    DatumWriter<Record> writer = new GenericDatumWriter<Record>(schema);
-    DataFileWriter<Record> fileWriter = new DataFileWriter<Record>(writer);
-    if(!files[fileIndex].getParentFile().exists()){
-      files[fileIndex].getParentFile().mkdirs();
-    }
-    if(!files[fileIndex].exists()){
-      files[fileIndex].createNewFile();
-    }
-    fileWriter.create(schema, files[fileIndex]);
-    List<Record> values = sort.values();
-    sort.clear();
-    for(int i = values.size() - 1; i >= 0; i--){
-      fileWriter.append(values.get(i));
-    }
-    values = null;
-    fileWriter.close();
-    fileIndex++;
+    long start = System.currentTimeMillis();
     if(fileIndex == numFiles){
-      fileMerge();
-      tmpFile.renameTo(files[0]);
-      fileIndex = 1;
+      int m = 1;
+      int num = numFiles - 1;
+      while((m + wTimes[num]) >= wTimes[num - 1]){
+        m += wTimes[num];
+        num--;
+        if(num == 0){
+          break;
+        }
+      }
+      fileMerge(num);
+      System.out.println("merge from " + num + " to " + (numFiles - 1));
+      wTimes[num] += m;
+      for(int i = num + 1; i < numFiles; i++){
+        wTimes[i] = 0;
+      }
+    }else{
+      DatumWriter<Record> writer = new GenericDatumWriter<Record>(schema);
+      DataFileWriter<Record> fileWriter = new DataFileWriter<Record>(writer);
+      if(!files[fileIndex].getParentFile().exists()){
+        files[fileIndex].getParentFile().mkdirs();
+      }
+      if(!files[fileIndex].exists()){
+        files[fileIndex].createNewFile();
+      }
+      fileWriter.create(schema, files[fileIndex]);
+      for(Record record : sort.values()){
+        fileWriter.append(record);
+      }
+      fileWriter.close();
+      wTimes[fileIndex]++;
+      fileIndex++;
     }
+    long end = System.currentTimeMillis();
+    System.out.println("Avro#######" + (++x) + "\ttime: " + (end - start) + "ms");
   }
 
-  private void fileMerge() throws IOException{
-    fileMerge(numFiles);
+  private void fileMerge(int num) throws IOException{
+    fileMerge(num, tmpFile);
   }
 
-  private void fileMerge(int no) throws IOException{
-    fileMerge(no, tmpFile);
-  }
-
-  private void fileMerge(int no, File file) throws IOException{
-    AvroReader[] readers = new AvroReader[no];
-    Record[] sortRecord = new Record[no];
-    int[] noR = new int[no];
+  private void fileMerge(int num, File file) throws IOException{
+    int no = numFiles - num;
+    File[] fs = new File[no];
     for(int i = 0; i < no; i++){
-      readers[i] = new AvroReader(schema, files[i]);
-      sortRecord[i] = readers[i].next();
-      noR[i] = i;
+      fs[i] = files[i + num];
     }
+    SortedAvroReader reader = new SortedAvroReader(fs, schema, sortKeyFields);
 
     DatumWriter<Record> writer = new GenericDatumWriter<Record>(schema);
     DataFileWriter<Record> fileWriter = new DataFileWriter<Record>(writer);
     fileWriter.create(schema, file);
-    //初始排序
-    Record[] tmp = sortRecord;
-    for(int i = 0; i < no - 1; i++){
-      for(int j = i + 1; j < no; j++){
-        ComparableKey k1 = new ComparableKey(tmp[i], sortKeyFields);
-        ComparableKey k2 = new ComparableKey(tmp[j], sortKeyFields);
-        if(k1.compareTo(k2) > 0){
-          int tmpNo = noR[i];
-          noR[i] = noR[j];
-          noR[j] = tmpNo;
-          Record tmpR = tmp[i];
-          tmp[i] = tmp[j];
-          tmp[j] = tmpR;
-        }
-      }
-    }
-    tmp = null;
 
-    int start = 0;
-    while(true){
-      if(start == no){
-        break;
-      }
-      fileWriter.append(sortRecord[noR[start]]);
-      if(!readers[noR[start]].hasNext()){
-        start++;
-        continue;
-      }
-      sortRecord[noR[start]] = readers[noR[start]].next();
-      int m = start;
-      ComparableKey key = new ComparableKey(sortRecord[noR[start]], sortKeyFields);
-      for(int i = start + 1; i < no; i++){
-        if(key.compareTo(new ComparableKey(sortRecord[noR[i]], sortKeyFields)) <= 0){
+    int index = 0;
+    while(reader.hasNext()){
+      Record r1 = reader.next();
+      CombKey key = new CombKey(r1, sortKeyFields);
+      while(index < sort.size()){
+        Record r2 = sort.get(index);
+        if(key.compareTo(new CombKey(r2, sortKeyFields)) < 0){
           break;
         }else{
-          m++;
+          fileWriter.append(r2);
+          index++;
+          continue;
         }
       }
-      if(m != start){
-        int tmpNo = noR[start];
-//        Record tmpR = sortRecord[start];
-        for(int i = start; i < m; i++){
-          noR[i] = noR[i + 1];
-//          sortRecord[i] = sortRecord[i + 1];
-        }
-        noR[m] = tmpNo;
-//        sortRecord[m] = tmpR;
-      }
+      fileWriter.append(r1);
+    }
+    while(index < sort.size()){
+      fileWriter.append(sort.get(index));
+      index++;
     }
     fileWriter.close();
+    sort.clear();
     for(int i = 0; i < no; i++){
-      files[i].delete();
+      fs[i].delete();
     }
+    tmpFile.renameTo(files[num]);
+    fileIndex = num + 1;
   }
 }
