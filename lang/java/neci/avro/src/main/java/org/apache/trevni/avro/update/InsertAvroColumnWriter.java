@@ -36,7 +36,7 @@ public class InsertAvroColumnWriter<K, V> {
   private int fileIndex = 0;
 
   public static final String SCHEMA_KEY = "avro.schema";
-  private static final int MAX = 200000;
+  private static final int MAX = 20000;
 
   public InsertAvroColumnWriter(Schema schema, String path, int numFiles, int[] keyFields) throws IOException {
     this.schema = schema;
