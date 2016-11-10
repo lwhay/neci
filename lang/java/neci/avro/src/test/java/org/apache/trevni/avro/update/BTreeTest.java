@@ -8,7 +8,6 @@ import java.nio.ByteBuffer;
 
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData.Record;
-import org.apache.trevni.avro.update.BTreeRecord.BTreeCreator;
 
 public class BTreeTest {
   public static void main(String[] args) throws IOException{
@@ -20,7 +19,6 @@ public class BTreeTest {
     BufferedReader reader = new BufferedReader(new FileReader(prFile));
     String line;
 
-    BTreeCreator creator = btree.createBTree();
     while((line = reader.readLine()) != null){
       String[] l = line.split("\\|");
       Record lineitem = new Record(schema);
@@ -40,10 +38,10 @@ public class BTreeTest {
       lineitem.put(13, l[13]);
       lineitem.put(14, l[14]);
       lineitem.put(15, l[15]);
-      creator.add(lineitem);
+      btree.put(lineitem, false);
     }
     reader.close();
-    creator.commit();
+    btree.close();
 
     btree.create();
     long f = 0;
@@ -55,7 +53,7 @@ public class BTreeTest {
       Record lineitem = new Record(schema);
       lineitem.put(0, Long.parseLong(l[0]));
       lineitem.put(3, Integer.parseInt(l[3]));
-      if((x = btree.get(lineitem)) == null){
+      if((x = btree.get(lineitem, false)) == null){
         f++;
       }else{
         t++;

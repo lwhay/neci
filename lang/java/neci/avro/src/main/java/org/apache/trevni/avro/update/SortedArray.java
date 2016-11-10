@@ -1,6 +1,7 @@
 package org.apache.trevni.avro.update;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
@@ -9,11 +10,9 @@ public class SortedArray<K, V> {
   private boolean sorted;
   private List<Element> elements;
 
-  private static final int MAX = 10000;
-
   private transient int size = 0;
 
-  private class Element{
+  private class Element implements Comparable<Element>{
     private K key;
     private V value;
 
@@ -29,11 +28,12 @@ public class SortedArray<K, V> {
       return value;
     }
 
-    void setKey(K key){
-      this.key = key;
-    }
-    void setValue(V value){
-      this.value = value;
+    public int compareTo(Element o){
+      if(comparator != null){
+        return comparator.compare(key, o.getKey());
+      }else{
+        return ((Comparable<? super K>)key).compareTo(o.getKey());
+      }
     }
   }
 
@@ -74,7 +74,7 @@ public class SortedArray<K, V> {
         if(cmp < 0)  i = m;
         else if(cmp > 0)  j = m;
         else  return elements.get(m).getValue();
-          }
+      }
     }
     return null;
   }
@@ -136,20 +136,23 @@ public class SortedArray<K, V> {
   }
 
   public List<V> values(){
+    return values(10000);
+  }
+
+  public List<V> values(int m){
     if(!sorted)  sort();
     List<V> values = new ArrayList<V>();
-    while(size > MAX){
-      for(int i = 0; i < MAX; i++){
-        values.add(elements.get(i).getValue());
-      }
-      elements.subList(0, MAX).clear();
-      size -= MAX;
+    int s;
+    if(size > m){
+      s = m;
+    }else{
+      s = size;
     }
-    for(int i = 0; i < size; i++){
+    for(int i = 0; i < s; i++){
       values.add(elements.get(i).getValue());
     }
-    elements.clear();
-    size = 0;
+    elements.subList(0, s).clear();
+    size -= s;
     return values;
   }
 
@@ -168,50 +171,33 @@ public class SortedArray<K, V> {
     if(!sorted)  sort();
     int i = 0;
     int j = size - 1;
-    if(comparator != null){
-      while(i != j){
-        int m = (i + j) / 2;
-        int cmp = comparator.compare(elements.get(m).getKey(), key);
-        if(cmp < 0)  i = m;
-        else if(cmp > 0)  j = m;
-        else{
-          elements.set(m, new Element(key, value));
-          return;
-        }
+    Element e = new Element(key, value);
+    while(i != j){
+      int m = (i + j) / 2;
+      int cmp = elements.get(m).compareTo(e);
+      if(cmp < 0)  i = m;
+      else if(cmp > 0)  j = m;
+      else{
+        elements.set(m, e);
+        return;
       }
-      int cm = comparator.compare(elements.get(i).getKey(), key);
-      if(cm < 0){
-        elements.add(i+1, new Element(key, value));
-      }else{
-        elements.add(i, new Element(key, value));
-      }
-      size++;
-    }else{
-      while(i != j){
-        int m = (i + j) / 2;
-        int cmp = ((Comparable<? super K>)elements.get(m).getKey()).compareTo(key);
-        if(cmp < 0)  i = m;
-        else if(cmp > 0)  j = m;
-        else{
-          elements.set(m, new Element(key, value));
-          return;
-        }
-      }
-      int cm = ((Comparable<? super K>)elements.get(i).getKey()).compareTo(key);
-      if(cm < 0){
-          elements.add(i+1, new Element(key, value));
-        }else{
-          elements.add(i, new Element(key, value));
-        }
-      size++;
     }
+    int cm = elements.get(i).compareTo(e);
+    if(cm < 0){
+        elements.add(i+1, e);
+      }else{
+        elements.add(i, e);
+      }
+    size++;
   }
 
   public void sort(){
     long start = System.currentTimeMillis();
-    sort(0, (size - 1));
+    Collections.sort(elements);
+//    sort(0, (size - 1));
     long end = System.currentTimeMillis();
     System.out.println("@@@sort time: " + (end - start));
+    sorted = true;
   }
 
   private void sort(int min, int max){

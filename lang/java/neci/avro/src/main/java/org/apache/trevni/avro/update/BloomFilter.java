@@ -44,8 +44,16 @@ public class BloomFilter {
     isActivated = true;
   }
 
+  public boolean isActivated(){
+    return isActivated;
+  }
+
   public boolean contains(Record record, long[] hashes) throws IOException{
     return (contains(new KeyToBytes(record), hashes));
+  }
+
+  public boolean contains(Record record, boolean isKey, long[] hashes)throws IOException{
+    return isKey?contains(record, hashes) : contains(record, keyFields, hashes);
   }
 
   public boolean contains(Record record, int[] keyFields, long[] hashes) throws IOException{
@@ -139,9 +147,6 @@ public class BloomFilter {
     public void write(File file) throws IOException{
       if(!file.getParentFile().exists()){
         file.getParentFile().mkdirs();
-      }
-      if(!file.exists()){
-        file.createNewFile();
       }
       BufferedOutputStream out = new BufferedOutputStream(new FileOutputStream(file));
       out.write(intToBytes(numHashes));

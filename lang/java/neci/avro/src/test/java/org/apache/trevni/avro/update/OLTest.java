@@ -75,7 +75,7 @@ public class OLTest {
     Schema lS = new Schema.Parser().parse(new File(schemaPath+"lineitem.avsc"));
     int[] fs = new int[]{0, 3};
 
-    InsertAvroColumnWriter<CombKey, Record> writer = new InsertAvroColumnWriter<CombKey, Record>(lS, olPath, 4, fs);
+    InsertAvroColumnWriter<CombKey, Record> writer = new InsertAvroColumnWriter<CombKey, Record>(lS, olPath, fs, Integer.parseInt(args[3]), Integer.parseInt(args[4]));
 
     String otemp = "";
     String ltemp = "";

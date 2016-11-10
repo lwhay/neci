@@ -12,7 +12,6 @@ import org.apache.avro.Schema;
 import org.apache.avro.Schema.Field;
 import org.apache.avro.Schema.Type;
 import org.apache.avro.generic.GenericData.Record;
-import org.apache.trevni.TrevniRuntimeException;
 import org.apache.trevni.avro.update.BloomFilter.BloomFilterBuilder;
 
 public class NestManager {
@@ -27,6 +26,8 @@ public class NestManager {
   private BTreeRecord[] offsetTree;
   private BTreeRecord[] backTree;
   private BTreeRecord forwardTree;
+
+  private CachList[] cach;
 
   private BloomFilter[] filter;
 
@@ -46,6 +47,10 @@ public class NestManager {
     offsetTree = new BTreeRecord[level];
     backTree = new BTreeRecord[level - 1];
     filter = new BloomFilter[level];
+    cach = new CachList[level];
+    for(int i = 0; i < level; i++){
+      cach[i] = new CachList(schemas[i].getKeyFields());
+    }
     new File(resultPath).mkdirs();
 
     Field keyField = null;
@@ -60,7 +65,7 @@ public class NestManager {
         keyFields.add(new Schema.Field(f.name(), f.schema(), null, null));
         fieldsCopy.add(new Schema.Field(f.name(), f.schema(), null, null));
       }
-      offsetTree[i] = new BTreeRecord(Schema.createRecord(s.getName(), s.getDoc(), s.getNamespace(), false, keyFields), new File(resultPath + s.getName() + ".db"), "btree");
+      offsetTree[i] = new BTreeRecord(schemas[i].getKeyFields(), Schema.createRecord(s.getName(), s.getDoc(), s.getNamespace(), false, keyFields), new File(resultPath + s.getName() + ".db"), "btree");
       if(keyField != null){
         fieldsCopy.add(keyField);
       }
@@ -84,11 +89,11 @@ public class NestManager {
       keyFields.add(new Schema.Field(f.name(), f.schema(), null, null));
       fieldsCopy.add(new Schema.Field(f.name(), f.schema(), null, null));
     }
-    offsetTree[0] = new BTreeRecord(Schema.createRecord(s.getName(), s.getDoc(), s.getNamespace(), false, keyFields), new File(resultPath + s.getName() + ".db"), "btree");
+    offsetTree[0] = new BTreeRecord(schemas[0].getKeyFields(), Schema.createRecord(s.getName(), s.getDoc(), s.getNamespace(), false, keyFields), new File(resultPath + s.getName() + ".db"), "btree");
     if(level > 1){
       fieldsCopy.add(keyField);
       nestKeySchema = Schema.createRecord(s.getName(), s.getDoc(), s.getNamespace(), false, fieldsCopy);
-      forwardTree = new BTreeRecord(nestKeySchema, new File(resultPath + "keys.db"), "btree");
+      forwardTree = new BTreeRecord(schemas[0].getKeyFields(), nestKeySchema, new File(resultPath + "keys.db"), "btree");
     }else{
       nestKeySchema = Schema.createRecord(s.getName(), s.getDoc(), s.getNamespace(), false, fieldsCopy);
     }
@@ -115,9 +120,8 @@ public class NestManager {
     }
   }
 
-  public boolean search(Record key, Schema valueSchema) throws IOException{
-    String name = key.getSchema().getName();
-    assert name.equals(valueSchema.getName());
+  public int getLevel(Record r){
+    String name = r.getSchema().getName();
     int le = 0;
     while(le < level){
       if(name.equals(schemas[le].getSchema().getName())){
@@ -125,12 +129,18 @@ public class NestManager {
       }
       le++;
     }
+    return le;
+  }
+
+  public boolean search(Record key, Schema valueSchema) throws IOException{
+    assert key.getSchema().getName().equals(valueSchema.getName());
+    int le = getLevel(key);
     if(!filter[le].isActivated()){
       filter[le].activate();
     }
     if(filter[le].contains(key, new long[2])){
       Object v;
-      if((v = offsetTree[le].get(key)) != null){
+      if((v = offsetTree[le].get(key, true)) != null){
         if(reader == null){
           reader = new ColumnReader<Record>(new File(resultPath + "result.trv"));
         }
@@ -140,8 +150,77 @@ public class NestManager {
         return true;
       }
     }
-//    System.out.println("The key is not existed:" + key);
+    System.out.println("The key is not existed:" + key);
     return false;
+  }
+
+  public void insert(Record data) throws IOException{
+    int le = getLevel(data);
+    byte b = cach[le].find(data);
+    if(b == (byte)-1){
+      if(!filter[le].isActivated()){
+        filter[le].activate();
+      }
+      if(filter[le].contains(data, false, new long[2])){
+        Object v;
+        if((v = offsetTree[le].get(data, false)) != null){
+          //update or insert disk exists error
+          return;
+        }else{
+          if(insertLegal(data, le))
+            insertToCach(data, le);
+        }
+      }else{
+        if(insertLegal(data, le))
+          insertToCach(data, le);
+      }
+    }else if(b == (byte)2){
+      if(insertLegal(data, le)){
+        cach[le].delete(data);
+        updateToCach(data, le);
+      }
+    }else{
+      //update or insert memory exists error
+    }
+  }
+
+  private boolean insertLegal(Record data, int le){
+    Record r = data;
+    boolean isKey = false;
+    for(int i = (level - le - 1); i < (level - 1); i++){
+      r = backTree[i].getRecord(r, isKey);
+      isKey = true;
+      if(r == null){
+        System.out.println("Illeagal insert");
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private void insertToCach(Record data, int le){
+    cachOperate(data, (byte)1, le);
+    backTree[level - le - 1].put(data, false);
+  }
+  private void updateToCach(Record data, int le){
+    cachOperate(data, (byte)3, le);
+    backTree[level - le - 1].put(data, false);
+  }
+  private void deleteToCach(Record data, int le){
+    cachOperate(data, (byte)2, le);
+    backTree[level - le - 1].remove(data, false);
+  }
+
+  private void cachOperate(Record data, byte flag, int le){
+    cach[le].add(data, flag);
+  }
+
+  private boolean exists(Record data, int le){
+    byte b = cach[le].find(data);
+    if(b == -1 || b == 2)
+      return false;
+    else
+      return true;
   }
 
   public void load(NestSchema schema) throws IOException{
@@ -195,7 +274,7 @@ public class NestManager {
 
     Record record1 = reader1.next();
     builder1.add(record1);
-    backTree[0].put(record1);
+    backTree[0].put(record1, false);
     while(reader2.hasNext()){
       Record record2 = reader2.next();
       builder2.add(record2);
@@ -208,7 +287,7 @@ public class NestManager {
           if(reader1.hasNext()){
             record1 = reader1.next();
             builder1.add(record1);
-            backTree[0].put(record1);
+            backTree[0].put(record1, false);
             continue;
           }else{
             break;
@@ -282,11 +361,11 @@ public class NestManager {
 
     Record record1 = reader1.next();
     builder1.add(record1);
-    backTree[0].put(record1);
+    backTree[0].put(record1, false);
     while(reader2.hasNext()){
       Record record2 = reader2.next();
       builder2.add(record2);
-      backTree[1].put(record2);
+      backTree[1].put(record2, false);
       ComparableKey k2 = new ComparableKey(record2, schema2.getKeyFields());
       List<Record> arr = new ArrayList<Record>();
       while(true){
@@ -296,7 +375,7 @@ public class NestManager {
           if(reader1.hasNext()){
             record1 = reader1.next();
             builder1.add(record1);
-            backTree[0].put(record1);
+            backTree[0].put(record1, false);
             continue;
           }else{
             break;
@@ -339,7 +418,7 @@ public class NestManager {
     while(reader2.hasNext()){
       Record record2 = reader2.next();
       builder2.add(record2);
-      backTree[bin].put(record2);
+      backTree[bin].put(record2, false);
       ComparableKey k2 = new ComparableKey(record2, schema2.getKeyFields());
       List<Record> arr = new ArrayList<Record>();
       while(true){
@@ -442,8 +521,8 @@ public class NestManager {
     }
     while(re.hasNext()){
       Record record = re.next().getRecord();
-      if(level > 1)  forwardTree.put(record, writeKeyRecord(record));
-      offsetTree[0].put(record, String.valueOf(index[0]));
+      if(level > 1)  forwardTree.put(record, writeKeyRecord(record), true);
+      offsetTree[0].put(record, String.valueOf(index[0]), true);
       index[0]++;
       List<Record> rs = (List<Record>)record.get(la[0]);
       for(int i = 1; i < level - 1; i++){
@@ -453,12 +532,12 @@ public class NestManager {
         for(int k = 0; k < tmp.size(); k++){
           Record r = tmp.get(k);
           rs.addAll((List<Record>)r.get(la[i]));
-          offsetTree[i].put(r, String.valueOf(index[i]));
+          offsetTree[i].put(r, String.valueOf(index[i]), true);
           index[i]++;
         }
       }
       for(int k = 0; k < rs.size(); k++){
-        offsetTree[level - 1].put(rs.get(k), String.valueOf(index[level - 1]));
+        offsetTree[level - 1].put(rs.get(k), String.valueOf(index[level - 1]), true);
         index[level - 1]++;
       }
     }

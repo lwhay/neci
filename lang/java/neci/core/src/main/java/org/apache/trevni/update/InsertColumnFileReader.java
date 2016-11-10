@@ -17,11 +17,11 @@ public class InsertColumnFileReader implements Closeable{
   private Input headFile;
   private Input dataFile;
 
-  private long rowCount;
+  private int rowCount;
   private int columnCount;
   private FileMetaData metaData;
   private ColumnDescriptor[] columns;
-  private Map<String,ColumnDescriptor> columnsByName;
+  private Map<String,Integer> columnsByName;
 
   public InsertColumnFileReader(File file) throws IOException{
     this.dataFile = new InputFile(file);
@@ -29,7 +29,7 @@ public class InsertColumnFileReader implements Closeable{
     readHeader();
   }
 
-  public long getRowCount() { return rowCount; }
+  public int getRowCount() { return rowCount; }
 
   public int getColumnCount() { return columnCount; }
 
@@ -59,20 +59,23 @@ public class InsertColumnFileReader implements Closeable{
     return getColumn(name).metaData;
   }
 
-  private <T extends Comparable> ColumnDescriptor<T> getColumn(String name) {
-    ColumnDescriptor column = columnsByName.get(name);
-    if (column == null)
+  public int getColumnNumber(String name){
+    if ((columnsByName.get(name)) == null)
       throw new TrevniRuntimeException("No column named: "+name);
-    return (ColumnDescriptor<T>)column;
+    return columnsByName.get(name);
+  }
+
+  private <T extends Comparable> ColumnDescriptor<T> getColumn(String name) {
+    return (ColumnDescriptor<T>)columns[getColumnNumber(name)];
   }
 
   private void readHeader() throws IOException{
     InputBuffer in = new InputBuffer(headFile, 0);
     readMagic(in);
-    this.rowCount = in.readFixed64();
+    this.rowCount = in.readFixed32();
     this.columnCount = in.readFixed32();
     this.metaData = FileMetaData.read(in);
-    this.columnsByName = new HashMap<String,ColumnDescriptor>(columnCount);
+    this.columnsByName = new HashMap<String,Integer>(columnCount);
 
     columns = new ColumnDescriptor[columnCount];
     readFileColumnMetaData(in);
@@ -105,7 +108,7 @@ public class InsertColumnFileReader implements Closeable{
       column.setBlockDescriptor(blocks);
       columns[i] = column;
       meta.setNumber(i);
-      columnsByName.put(meta.getName(), column);
+      columnsByName.put(meta.getName(), i);
     }
   }
 

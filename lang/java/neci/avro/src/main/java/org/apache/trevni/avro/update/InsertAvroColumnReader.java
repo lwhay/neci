@@ -156,7 +156,7 @@ public class InsertAvroColumnReader<D> implements Iterator<D>, Iterable<D>, Clos
     return values[0].hasNext();
   }
 
-  public long getRowCount() { return reader.getRowCount(); }
+  public int getRowCount() { return reader.getRowCount(); }
 
   @Override
   public D next() {
@@ -203,7 +203,7 @@ public class InsertAvroColumnReader<D> implements Iterator<D>, Iterable<D>, Clos
         this.column = startColumn;
         Object value;
         if(isSimple(s.getElementType()))
-          value = nextValue(s, column++);
+          value = nextValue(s, ++column);
         else {
           column++;
           value = read(s.getElementType());

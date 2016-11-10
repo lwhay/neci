@@ -12,12 +12,12 @@ import org.apache.trevni.ValueType;
 public class InsertColumnFileWriter {
   private FileColumnMetaData[] meta;
   private FileMetaData filemeta;
-  private InsertColumnFileReader reader;
-  private ColumnValues[] values;
+  private File[] files;
+  private InsertColumnFileReader[] readers;
   private ListArr[] insert;
-  private long rowcount;
+  private int rowcount;
   private int columncount;
-  private long[] gap;
+  private int[] gap;
   private int[] nest;
   private long[] columnStart;
   private Blocks[] blocks;
@@ -97,8 +97,12 @@ public class InsertColumnFileWriter {
     }
   }
 
-  public void setReadFile(File file) throws IOException{
-    this.reader  = new InsertColumnFileReader(file);
+  public void setMergeFiles(File[] files) throws IOException{
+    this.files = files;
+    readers = new InsertColumnFileReader[files.length];
+    for(int i = 0; i < files.length; i++){
+      readers[i] = new InsertColumnFileReader(files[i]);
+    }
   }
 
   public void setInsert(ListArr[] sort){
@@ -106,7 +110,7 @@ public class InsertColumnFileWriter {
     this.addRow = sort[0].size();
   }
 
-  public void setGap(long[] gap){
+  public void setGap(int[] gap){
     this.gap = gap;
   }
 
@@ -116,11 +120,11 @@ public class InsertColumnFileWriter {
     appendTo(head, data);
   }
 
-  public void insertTo(File file) throws IOException {
-    OutputStream data = new FileOutputStream(file);
-    OutputStream head = new FileOutputStream(new File(file.getPath().substring(0, file.getPath().lastIndexOf(".")) + ".head"));
-    insertTo(head, data);
-  }
+//  public void insertTo(File file) throws IOException {
+//    OutputStream data = new FileOutputStream(file);
+//    OutputStream head = new FileOutputStream(new File(file.getPath().substring(0, file.getPath().lastIndexOf(".")) + ".head"));
+//    insertTo(head, data);
+//  }
 
   public void appendTo(OutputStream head, OutputStream data) throws IOException {
     rowcount = addRow;
@@ -129,16 +133,112 @@ public class InsertColumnFileWriter {
     writeHeader(head);
   }
 
-  public void insertTo(OutputStream head, OutputStream data) throws IOException {
-    rowcount = addRow + reader.getRowCount();
-    values = new ColumnValues[meta.length];
-    for(int i = 0; i < meta.length; i++){
-      values[i] = reader.getValues(i);
+  public void mergeFiles(File file) throws IOException{
+    mergeFiles(new FileOutputStream(new File(file.getPath().substring(0, file.getPath().lastIndexOf(".")) + ".head")), new FileOutputStream(file));
+  }
+
+  public void mergeFiles(OutputStream head, OutputStream data) throws IOException{
+    rowcount = gap.length;
+    nest = new int[rowcount];
+    for(int i = 0; i < rowcount; i++){
+      nest[i] = 1;
+    }
+    for(int i = 0; i < columncount; i++){
+      if(meta[i].getType() == ValueType.NULL){
+        mergeArrayColumn(data, i);
+      }else{
+        mergeColumn(data, i);
+      }
+    }
+    writeHeader(head);
+    for(int i = 0; i < readers.length; i++){
+      readers[i].close();
+      files[i].delete();
+      new File(files[i].getPath().substring(0, files[i].getPath().lastIndexOf(".")) + ".head").delete();
+    }
+  }
+
+  private void mergeColumn(OutputStream out, int column) throws IOException{
+    OutputBuffer buf = new OutputBuffer();
+    int row = 0;
+    ColumnValues[] values = new ColumnValues[readers.length];
+    for(int i = 0; i < readers.length; i++){
+      values[i] = readers[i].getValues(column);
+    }
+    ValueType type = meta[column].getType();
+
+    for(int i = 0; i < rowcount; i++){
+      int index = gap[i];
+      for(int j = 0; j < nest[i]; j++){
+        if(buf.isFull()){
+          BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
+          blocks[column].add(b);
+          row = 0;
+          buf.writeTo(out);
+          buf.reset();
+        }
+        values[index].startRow();
+        buf.writeValue(values[index].nextValue(), type);
+        row++;
+      }
     }
 
-    writeColumns(data);
-    writeHeader(head);
+    if(buf.size() != 0){
+      BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
+      blocks[column].add(b);
+      buf.writeTo(out);
+    }
+
+    buf.close();
   }
+
+  private void mergeArrayColumn(OutputStream out, int column) throws IOException{
+  OutputBuffer buf = new OutputBuffer();
+    int row = 0;
+    ColumnValues[] values = new ColumnValues[readers.length];
+    for(int i = 0; i < readers.length; i++){
+      values[i] = readers[i].getValues(column);
+    }
+    int[] tmpnest = nest.clone();
+
+    for(int i = 0; i < rowcount; i++){
+      int index = gap[i];
+      nest[i] = 0;
+      for(int j = 0; j < tmpnest[i]; j++){
+        if(buf.isFull()){
+          BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
+          blocks[column].add(b);
+          row = 0;
+          buf.writeTo(out);
+          buf.reset();
+        }
+        values[index].startRow();
+        int length = values[index].nextLength();
+        nest[i] += length;
+        buf.writeLength(length);
+        row++;
+      }
+    }
+
+    if(buf.size() != 0){
+      BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
+      blocks[column].add(b);
+      buf.writeTo(out);
+    }
+
+    buf.close();
+  }
+
+//  public void insertTo(OutputStream head, OutputStream data) throws IOException {
+//    rowcount = addRow + reader.getRowCount();
+//    values = new ColumnValues[meta.length];
+//    for(int i = 0; i < meta.length; i++){
+//      values[i] = reader.getValues(i);
+//    }
+//
+//    writeColumns(data);
+//    writeHeader(head);
+//  }
 
   private void writeSourceColumns(OutputStream out) throws IOException {
     OutputBuffer buf = new OutputBuffer();
@@ -184,165 +284,165 @@ public class InsertColumnFileWriter {
     buf.close();
   }
 
-  private void writeColumns(OutputStream out) throws IOException {
-    assert(gap.length == (addRow + 1));
-    nest = new int[addRow];
-    for (int k = 0; k < addRow; k++) {
-      nest[k] = 1;
-    }
+//  private void writeColumns(OutputStream out) throws IOException {
+//    assert(gap.length == (addRow + 1));
+//    nest = new int[addRow];
+//    for (int k = 0; k < addRow; k++) {
+//      nest[k] = 1;
+//    }
+//
+//    for (int j = 0; j < columncount; j++) {
+//      if (meta[j].getType() == ValueType.NULL) {
+//        writeArrayColumn(out, j);
+//      } else {
+//        writeColumn(out, j);
+//      }
+//    }
+////        MemPrint();
+////    reader.close();
+////    reader = null;
+////    values = null;
+//    insert = null;
+//    gap = null;
+//    nest = null;
+//  }
 
-    for (int j = 0; j < columncount; j++) {
-      if (meta[j].getType() == ValueType.NULL) {
-        writeArrayColumn(out, j);
-      } else {
-        writeColumn(out, j);
-      }
-    }
-//        MemPrint();
-    reader.close();
-    reader = null;
-    values = null;
-    insert = null;
-    gap = null;
-    nest = null;
-  }
-
-  private void writeColumn(OutputStream out, int column) throws IOException {
-    OutputBuffer buf = new OutputBuffer();
-    int row = 0;
-    int realrow = 0;
-    ValueType type = meta[column].getType();
-
-    for (int i = 0; i < addRow; i++) {
-      for (int k = 0; k < gap[i]; k++) {
-        if(buf.isFull()){
-          BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
-          blocks[column].add(b);
-          row = 0;
-          buf.writeTo(out);
-          buf.reset();
-        }
-        values[column].startRow();
-        buf.writeValue(values[column].nextValue(), type);
-        row++;
-      }
-      for (int r = 0; r < nest[i]; r++) {
-        if(buf.isFull()){
-          BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
-          blocks[column].add(b);
-          row = 0;
-          buf.writeTo(out);
-          buf.reset();
-        }
-        buf.writeValue(insert[column].get(realrow), type);
-        row++;
-        realrow++;
-      }
-    }
-    assert (realrow == insert[column].size());
-    insert[column].clear();
-
-    for (int k = 0; k < gap[addRow]; k++) {
-      if(buf.isFull()){
-        BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
-        blocks[column].add(b);
-        row = 0;
-        buf.writeTo(out);
-        buf.reset();
-      }
-      values[column].startRow();
-      buf.writeValue(values[column].nextValue(), type);
-      row++;
-    }
-
-    if(buf.size() != 0){
-      BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
-      blocks[column].add(b);
-      buf.writeTo(out);
-    }
-
-    buf.close();
-  }
+//  private void writeColumn(OutputStream out, int column) throws IOException {
+//    OutputBuffer buf = new OutputBuffer();
+//    int row = 0;
+//    int realrow = 0;
+//    ValueType type = meta[column].getType();
+//
+//    for (int i = 0; i < addRow; i++) {
+//      for (int k = 0; k < gap[i]; k++) {
+//        if(buf.isFull()){
+//          BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
+//          blocks[column].add(b);
+//          row = 0;
+//          buf.writeTo(out);
+//          buf.reset();
+//        }
+//        values[column].startRow();
+//        buf.writeValue(values[column].nextValue(), type);
+//        row++;
+//      }
+//      for (int r = 0; r < nest[i]; r++) {
+//        if(buf.isFull()){
+//          BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
+//          blocks[column].add(b);
+//          row = 0;
+//          buf.writeTo(out);
+//          buf.reset();
+//        }
+//        buf.writeValue(insert[column].get(realrow), type);
+//        row++;
+//        realrow++;
+//      }
+//    }
+//    assert (realrow == insert[column].size());
+//    insert[column].clear();
+//
+//    for (int k = 0; k < gap[addRow]; k++) {
+//      if(buf.isFull()){
+//        BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
+//        blocks[column].add(b);
+//        row = 0;
+//        buf.writeTo(out);
+//        buf.reset();
+//      }
+//      values[column].startRow();
+//      buf.writeValue(values[column].nextValue(), type);
+//      row++;
+//    }
+//
+//    if(buf.size() != 0){
+//      BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
+//      blocks[column].add(b);
+//      buf.writeTo(out);
+//    }
+//
+//    buf.close();
+//  }
 
 
-  private void writeArrayColumn(OutputStream out, int column) throws IOException {
-    OutputBuffer buf = new OutputBuffer();
-    int row = 0;
-    int realrow = 0;
-    long[] tmgap = new long[addRow + 1];
-    int[] tmnest = new int[addRow];
-    ValueType type = meta[column].getType();
-    if(type == ValueType.NULL){
-      int y = 0;
-      for(int x = 0; x <addRow; x++){
-        for(int no = 0; no < nest[x]; no++){
-          tmnest[x] += (Integer) insert[column].get(y + no);
-        }
-        y += nest[x];
-      }
-    }
-
-    for (int i = 0; i < addRow; i++) {
-      for (long k = 0; k < gap[i]; k++) {
-        if(buf.isFull()){
-          BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
-          blocks[column].add(b);
-          row = 0;
-          buf.writeTo(out);
-          buf.reset();
-        }
-        values[column].startRow();
-        int length = values[column].nextLength();
-        buf.writeLength(length);
-        tmgap[i] += length;
-        row++;
-      }
-      for (int r = 0; r < nest[i]; r++) {
-        if(buf.isFull()){
-          BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
-          blocks[column].add(b);
-          row = 0;
-          buf.writeTo(out);
-          buf.reset();
-        }
-        buf.writeLength((Integer) insert[column].get(realrow));
-        realrow++;
-        row++;
-      }
-    }
-    assert (realrow == insert[column].size());
-    insert[column].clear();
-
-    for (long k = 0; k < gap[addRow]; k++) {
-      if(buf.isFull()){
-        BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
-        blocks[column].add(b);
-        row = 0;
-        buf.writeTo(out);
-        buf.reset();
-      }
-      values[column].startRow();
-      int len = values[column].nextLength();
-      buf.writeLength(len);
-      tmgap[addRow] += len;
-      row++;
-    }
-    nest = tmnest;
-    gap = tmgap;
-
-    if(buf.size() != 0){
-      BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
-      blocks[column].add(b);
-      buf.writeTo(out);
-    }
-
-    buf.close();
-  }
+//  private void writeArrayColumn(OutputStream out, int column) throws IOException {
+//    OutputBuffer buf = new OutputBuffer();
+//    int row = 0;
+//    int realrow = 0;
+//    long[] tmgap = new long[addRow + 1];
+//    int[] tmnest = new int[addRow];
+//    ValueType type = meta[column].getType();
+//    if(type == ValueType.NULL){
+//      int y = 0;
+//      for(int x = 0; x <addRow; x++){
+//        for(int no = 0; no < nest[x]; no++){
+//          tmnest[x] += (Integer) insert[column].get(y + no);
+//        }
+//        y += nest[x];
+//      }
+//    }
+//
+//    for (int i = 0; i < addRow; i++) {
+//      for (long k = 0; k < gap[i]; k++) {
+//        if(buf.isFull()){
+//          BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
+//          blocks[column].add(b);
+//          row = 0;
+//          buf.writeTo(out);
+//          buf.reset();
+//        }
+//        values[column].startRow();
+//        int length = values[column].nextLength();
+//        buf.writeLength(length);
+//        tmgap[i] += length;
+//        row++;
+//      }
+//      for (int r = 0; r < nest[i]; r++) {
+//        if(buf.isFull()){
+//          BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
+//          blocks[column].add(b);
+//          row = 0;
+//          buf.writeTo(out);
+//          buf.reset();
+//        }
+//        buf.writeLength((Integer) insert[column].get(realrow));
+//        realrow++;
+//        row++;
+//      }
+//    }
+//    assert (realrow == insert[column].size());
+//    insert[column].clear();
+//
+//    for (long k = 0; k < gap[addRow]; k++) {
+//      if(buf.isFull()){
+//        BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
+//        blocks[column].add(b);
+//        row = 0;
+//        buf.writeTo(out);
+//        buf.reset();
+//      }
+//      values[column].startRow();
+//      int len = values[column].nextLength();
+//      buf.writeLength(len);
+//      tmgap[addRow] += len;
+//      row++;
+//    }
+//    nest = tmnest;
+//    gap = tmgap;
+//
+//    if(buf.size() != 0){
+//      BlockDescriptor b = new BlockDescriptor(row, buf.size(), buf.size());
+//      blocks[column].add(b);
+//      buf.writeTo(out);
+//    }
+//
+//    buf.close();
+//  }
 
   public void writeHeader(OutputStream out) throws IOException {
     OutputBuffer header = new OutputBuffer();
     header.write(MAGIC);
-    header.writeFixed64(rowcount);
+    header.writeFixed32(rowcount);
     header.writeFixed32(columncount);
     filemeta.write(header);
     int i = 0;

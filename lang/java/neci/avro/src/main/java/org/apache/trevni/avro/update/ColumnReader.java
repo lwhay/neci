@@ -71,8 +71,8 @@ public class ColumnReader<D> implements Closeable {
       long newRow = 0;
       values[readNO[column]].startBlock(0);
       for(int i = 0; i < row; i++){
-        values[readNO[column]].startRow();
         newRow += values[readNO[column]].nextLength();
+        values[readNO[column]].startRow();
       }
       int length = values[readNO[column]].nextLength();
       List elements = (List) new GenericData.Array(length, s);

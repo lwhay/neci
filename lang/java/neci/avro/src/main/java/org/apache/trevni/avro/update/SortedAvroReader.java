@@ -83,6 +83,12 @@ public class SortedAvroReader {
     return (start < numFiles);
   }
 
+  public void close() throws IOException{
+    for(AvroReader reader : readers){
+      reader.close();
+    }
+  }
+
   public static class AvroReader{
     private DataFileReader<Record> fileReader;
 
@@ -97,6 +103,10 @@ public class SortedAvroReader {
 
     public Record next(){
       return fileReader.next();
+    }
+
+    public void close() throws IOException{
+      fileReader.close();
     }
   }
 }

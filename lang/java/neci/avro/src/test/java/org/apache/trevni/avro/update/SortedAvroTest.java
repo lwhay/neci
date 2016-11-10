@@ -15,7 +15,8 @@ public class SortedAvroTest {
     Schema s = new Schema.Parser().parse(new File("/home/ly/schemas/o_l.avsc"));
 //    EncodeSchema e = new EncodeSchema(s);
 //    System.out.println(e.getEncode().toString());
-    SortedAvroWriter writer = new SortedAvroWriter("/home/ly/avrotest/", 4, s, new int[]{0, 3});
+    int[] fields = new int[]{0, 3};
+    SortedAvroWriter<ComparableKey, Record> writer = new SortedAvroWriter<ComparableKey, Record>("/home/ly/avrotest/", s, Integer.parseInt(args[0]), Integer.parseInt(args[1]));
     BufferedReader reader = new BufferedReader(new FileReader(file));
     String line = "";
     while((line = reader.readLine()) != null){
@@ -37,7 +38,7 @@ public class SortedAvroTest {
       lineitem.put(13, l[13]);
       lineitem.put(14, l[14]);
       lineitem.put(15, l[15]);
-      writer.append(lineitem);
+      writer.append(new ComparableKey(lineitem, fields), lineitem);
     }
     reader.close();
     writer.flush();

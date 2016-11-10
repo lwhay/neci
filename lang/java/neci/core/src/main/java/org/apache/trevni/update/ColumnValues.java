@@ -91,7 +91,7 @@ public class ColumnValues<T extends Comparable>
     }
   }
 
-  private void startBlock(int block) throws IOException {
+  public void startBlock(int block) throws IOException {
     this.block = block;
     this.row = column.firstRows[block];
 
